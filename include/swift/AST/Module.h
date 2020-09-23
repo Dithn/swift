@@ -20,6 +20,7 @@
 #include "swift/AST/Decl.h"
 #include "swift/AST/DeclContext.h"
 #include "swift/AST/Identifier.h"
+#include "swift/AST/Import.h"
 #include "swift/AST/LookupKinds.h"
 #include "swift/AST/RawComment.h"
 #include "swift/AST/Type.h"
@@ -202,17 +203,16 @@ class ModuleDecl : public DeclContext, public TypeDecl {
   friend class DirectPrecedenceGroupLookupRequest;
 
 public:
-  typedef ArrayRef<Located<Identifier>> AccessPathTy;
   /// Convenience struct to keep track of a module along with its access path.
-  struct ImportedModule {
+  struct alignas(uint64_t) ImportedModule {
     /// The access path from an import: `import Foo.Bar` -> `Foo.Bar`.
-    ModuleDecl::AccessPathTy accessPath;
+    ImportPath::Access accessPath;
     /// The actual module corresponding to the import.
     ///
     /// Invariant: The pointer is non-null.
     ModuleDecl *importedModule;
 
-    ImportedModule(ModuleDecl::AccessPathTy accessPath,
+    ImportedModule(ImportPath::Access accessPath,
                    ModuleDecl *importedModule)
         : accessPath(accessPath), importedModule(importedModule) {
       assert(this->importedModule);
@@ -224,13 +224,6 @@ public:
     }
   };
 
-  static bool matchesAccessPath(AccessPathTy AccessPath, DeclName Name) {
-    assert(AccessPath.size() <= 1 && "can only refer to top-level decls");
-  
-    return AccessPath.empty()
-      || DeclName(AccessPath.front().Item).matchesRef(Name);
-  }
-
   /// Arbitrarily orders ImportedModule records, for inclusion in sets and such.
   class OrderImportedModules {
   public:
@@ -239,8 +232,8 @@ public:
       if (lhs.importedModule != rhs.importedModule)
         return std::less<const ModuleDecl *>()(lhs.importedModule,
                                                rhs.importedModule);
-      if (lhs.accessPath.data() != rhs.accessPath.data())
-        return std::less<AccessPathTy::iterator>()(lhs.accessPath.begin(),
+      if (lhs.accessPath.getRaw().data() != rhs.accessPath.getRaw().data())
+        return std::less<ImportPath::Raw::iterator>()(lhs.accessPath.begin(),
                                                    rhs.accessPath.begin());
       return lhs.accessPath.size() < rhs.accessPath.size();
     }
@@ -367,26 +360,22 @@ public:
     return { Files.begin(), Files.size() };
   }
 
-  bool isClangModule() const;
   void addFile(FileUnit &newFile);
 
-  /// Creates a map from \c #filePath strings to corresponding \c #file
+  /// Creates a map from \c #filePath strings to corresponding \c #fileID
   /// strings, diagnosing any conflicts.
   ///
-  /// A given \c #filePath string always maps to exactly one \c #file string,
+  /// A given \c #filePath string always maps to exactly one \c #fileID string,
   /// but it is possible for \c #sourceLocation directives to introduce
   /// duplicates in the opposite direction. If there are such conflicts, this
   /// method will diagnose the conflict and choose a "winner" among the paths
-  /// in a reproducible way. The \c bool paired with the \c #file string is
+  /// in a reproducible way. The \c bool paired with the \c #fileID string is
   /// \c true for paths which did not have a conflict or won a conflict, and
   /// \c false for paths which lost a conflict. Thus, if you want to generate a
-  /// reverse mapping, you should drop or special-case the \c #file strings that
-  /// are paired with \c false.
-  ///
-  /// Note that this returns an empty StringMap if concise \c #file strings are
-  /// disabled. Users should fall back to using the file path in this case.
+  /// reverse mapping, you should drop or special-case the \c #fileID strings
+  /// that are paired with \c false.
   llvm::StringMap<std::pair<std::string, /*isWinner=*/bool>>
-  computeMagicFileStringMap(bool shouldDiagnose) const;
+  computeFileIDMap(bool shouldDiagnose) const;
 
   /// Add a file declaring a cross-import overlay.
   void addCrossImportOverlayFile(StringRef file);
@@ -469,7 +458,7 @@ public:
 
   /// Convenience accessor for clients that know what kind of file they're
   /// dealing with.
-  SourceFile &getMainSourceFile(SourceFileKind expectedKind) const;
+  SourceFile &getMainSourceFile() const;
 
   /// Convenience accessor for clients that know what kind of file they're
   /// dealing with.
@@ -586,7 +575,7 @@ public:
   /// Find ValueDecls in the module and pass them to the given consumer object.
   ///
   /// This does a simple local lookup, not recursively looking through imports.
-  void lookupVisibleDecls(AccessPathTy AccessPath,
+  void lookupVisibleDecls(ImportPath::Access AccessPath,
                           VisibleDeclConsumer &Consumer,
                           NLKind LookupKind) const;
 
@@ -599,13 +588,13 @@ public:
   /// Finds all class members defined in this module.
   ///
   /// This does a simple local lookup, not recursively looking through imports.
-  void lookupClassMembers(AccessPathTy accessPath,
+  void lookupClassMembers(ImportPath::Access accessPath,
                           VisibleDeclConsumer &consumer) const;
 
   /// Finds class members defined in this module with the given name.
   ///
   /// This does a simple local lookup, not recursively looking through imports.
-  void lookupClassMember(AccessPathTy accessPath,
+  void lookupClassMember(ImportPath::Access accessPath,
                          DeclName name,
                          SmallVectorImpl<ValueDecl*> &results) const;
 
@@ -689,6 +678,12 @@ public:
   void
   getImportedModulesForLookup(SmallVectorImpl<ImportedModule> &imports) const;
 
+  /// Has \p module been imported via an '@_implementationOnly' import
+  /// instead of another kind of import?
+  ///
+  /// This assumes that \p module was imported.
+  bool isImportedImplementationOnly(const ModuleDecl *module) const;
+
   /// Uniques the items in \p imports, ignoring the source locations of the
   /// access paths.
   ///
@@ -749,12 +744,6 @@ public:
   /// Generate the list of libraries needed to link this module, based on its
   /// imports.
   void collectLinkLibraries(LinkLibraryCallback callback) const;
-
-  /// Returns true if the two access paths contain the same chain of
-  /// identifiers.
-  ///
-  /// Source locations are ignored here.
-  static bool isSameAccessPath(AccessPathTy lhs, AccessPathTy rhs);
 
   /// Get the path for the file that this module came from, or an empty
   /// string if this is not applicable.
@@ -887,7 +876,7 @@ namespace llvm {
     static bool isEqual(const ModuleDecl::ImportedModule &lhs,
                         const ModuleDecl::ImportedModule &rhs) {
       return lhs.importedModule == rhs.importedModule &&
-             ModuleDecl::isSameAccessPath(lhs.accessPath, rhs.accessPath);
+             lhs.accessPath.isSameAs(rhs.accessPath);
     }
   };
 }

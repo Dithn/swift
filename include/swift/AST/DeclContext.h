@@ -508,14 +508,6 @@ public:
   /// FIXME: do this for Protocols, too someday
   bool canBeParentOfExtension() const;
 
-  /// Returns true if lookups within this context could affect downstream files.
-  ///
-  /// \param functionsAreNonCascading If true, functions are considered non-
-  /// cascading contexts. If false, functions are considered non-cascading only
-  /// if implicitly or explicitly marked private. When concerned only with a
-  /// function's body, pass true.
-  bool isCascadingContextForLookup(bool functionsAreNonCascading) const;
-
   /// Look for the set of declarations with the given name within a type,
   /// its extensions and, optionally, its supertypes.
   ///
@@ -782,6 +774,16 @@ public:
 
   /// Retrieve the set of members in this context.
   DeclRange getMembers() const;
+
+  /// Get the members that were syntactically present in the source code,
+  /// and will not contain any members that are implicitly synthesized by
+  /// the implementation.
+  ArrayRef<Decl *> getParsedMembers() const;
+
+  /// Get all the members that are semantically within this context,
+  /// including any implicitly-synthesized members.
+  /// The resulting list of members will be stable across translation units.
+  ArrayRef<Decl *> getSemanticMembers() const;
 
   /// Retrieve the set of members in this context without loading any from the
   /// associated lazy loader; this should only be used as part of implementing

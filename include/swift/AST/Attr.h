@@ -35,6 +35,7 @@
 #include "swift/AST/Ownership.h"
 #include "swift/AST/PlatformKind.h"
 #include "swift/AST/Requirement.h"
+#include "swift/AST/StorageImpl.h"
 #include "swift/AST/TrailingCallArguments.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -417,6 +418,9 @@ public:
 
     /// The opposite of ABIBreakingToRemove
     ABIStableToRemove = 1ull << (unsigned(DeclKindIndex::Last_Decl) + 15),
+
+    /// Whether this attribute is only valid when concurrency is enabled.
+    ConcurrencyOnly = 1ull << (unsigned(DeclKindIndex::Last_Decl) + 16),
   };
 
   LLVM_READNONE
@@ -493,6 +497,10 @@ public:
 
   static bool isSilOnly(DeclAttrKind DK) {
     return getOptions(DK) & SILOnly;
+  }
+
+  static bool isConcurrencyOnly(DeclAttrKind DK) {
+    return getOptions(DK) & ConcurrencyOnly;
   }
 
   static bool isUserInaccessible(DeclAttrKind DK) {
@@ -1426,7 +1434,7 @@ public:
 
   TrailingWhereClause *getTrailingWhereClause() const;
 
-  GenericSignature getSpecializedSgnature() const {
+  GenericSignature getSpecializedSignature() const {
     return specializedSignature;
   }
 
@@ -1714,12 +1722,6 @@ public:
   }
 };
 
-/// A declaration name with location.
-struct DeclNameRefWithLoc {
-  DeclNameRef Name;
-  DeclNameLoc Loc;
-};
-
 /// Attribute that marks a function as differentiable.
 ///
 /// Examples:
@@ -1843,6 +1845,18 @@ public:
   static bool classof(const DeclAttribute *DA) {
     return DA->getKind() == DAK_Differentiable;
   }
+};
+
+/// A declaration name with location.
+struct DeclNameRefWithLoc {
+  /// The declaration name.
+  DeclNameRef Name;
+  /// The declaration name location.
+  DeclNameLoc Loc;
+  /// An optional accessor kind.
+  Optional<AccessorKind> AccessorKind;
+
+  void print(ASTPrinter &Printer) const;
 };
 
 /// The `@derivative(of:)` attribute registers a function as a derivative of

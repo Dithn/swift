@@ -238,12 +238,14 @@ void collectMinimalIndicesForFunctionCall(
     resultIndices.push_back(inoutParamResultIndex++);
   }
   // Make sure the function call has active results.
+#ifndef NDEBUG
   auto numResults = calleeFnTy->getNumResults() +
                     calleeFnTy->getNumIndirectMutatingParameters();
   assert(results.size() == numResults);
   assert(llvm::any_of(results, [&](SILValue result) {
     return activityInfo.isActive(result, parentIndices);
   }));
+#endif
 }
 
 //===----------------------------------------------------------------------===//
@@ -269,11 +271,11 @@ SILLocation getValidLocation(SILInstruction *inst) {
 //===----------------------------------------------------------------------===//
 
 VarDecl *getTangentStoredProperty(ADContext &context, VarDecl *originalField,
-                                  SILLocation loc,
+                                  CanType baseType, SILLocation loc,
                                   DifferentiationInvoker invoker) {
   auto &astCtx = context.getASTContext();
   auto tanFieldInfo = evaluateOrDefault(
-      astCtx.evaluator, TangentStoredPropertyRequest{originalField},
+      astCtx.evaluator, TangentStoredPropertyRequest{originalField, baseType},
       TangentPropertyInfo(nullptr));
   // If no error, return the tangent property.
   if (tanFieldInfo)
@@ -328,13 +330,14 @@ VarDecl *getTangentStoredProperty(ADContext &context, VarDecl *originalField,
 
 VarDecl *getTangentStoredProperty(ADContext &context,
                                   FieldIndexCacheBase *projectionInst,
+                                  CanType baseType,
                                   DifferentiationInvoker invoker) {
   assert(isa<StructExtractInst>(projectionInst) ||
          isa<StructElementAddrInst>(projectionInst) ||
          isa<RefElementAddrInst>(projectionInst));
   auto loc = getValidLocation(projectionInst);
-  return getTangentStoredProperty(context, projectionInst->getField(), loc,
-                                  invoker);
+  return getTangentStoredProperty(context, projectionInst->getField(), baseType,
+                                  loc, invoker);
 }
 
 //===----------------------------------------------------------------------===//
@@ -449,8 +452,11 @@ findMinimalDerivativeConfiguration(AbstractFunctionDecl *original,
          silParameterIndices->getNumIndices() <
              minimalConfig->parameterIndices->getNumIndices())) {
       minimalASTParameterIndices = config.parameterIndices;
-      minimalConfig = AutoDiffConfig(silParameterIndices, config.resultIndices,
-                                     config.derivativeGenericSignature);
+      minimalConfig =
+          AutoDiffConfig(silParameterIndices, config.resultIndices,
+                         autodiff::getDifferentiabilityWitnessGenericSignature(
+                             original->getGenericSignature(),
+                             config.derivativeGenericSignature));
     }
   }
   return minimalConfig;

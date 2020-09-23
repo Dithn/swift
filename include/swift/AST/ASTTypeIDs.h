@@ -23,6 +23,7 @@
 namespace swift {
 
 class AbstractFunctionDecl;
+class ActorIsolation;
 class BraceStmt;
 class ClosureExpr;
 class CodeCompletionCallbacksFactory;
@@ -30,6 +31,7 @@ class ConstructorDecl;
 class CustomAttr;
 class Decl;
 class EnumDecl;
+class FuncDecl;
 enum class FunctionBuilderBodyPreCheck : uint8_t;
 class GenericParamList;
 class GenericSignature;
@@ -59,6 +61,7 @@ class Requirement;
 enum class ResilienceExpansion : unsigned;
 struct FragileFunctionKind;
 class SourceFile;
+class SymbolSourceMap;
 struct TangentPropertyInfo;
 class Type;
 class TypeAliasDecl;

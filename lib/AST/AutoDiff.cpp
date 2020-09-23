@@ -282,7 +282,7 @@ GenericSignature autodiff::getConstrainedDerivativeGenericSignature(
     // Require differentiability parameters to conform to `Differentiable`.
     auto paramType = originalFnTy->getParameters()[paramIdx].getInterfaceType();
     Requirement req(RequirementKind::Conformance, paramType,
-                    diffableProto->getDeclaredType());
+                    diffableProto->getDeclaredInterfaceType());
     requirements.push_back(req);
     if (isTranspose) {
       // Require linearity parameters to additionally satisfy
@@ -372,6 +372,23 @@ bool autodiff::getBuiltinDifferentiableOrLinearFunctionConfig(
   return operationName.empty();
 }
 
+GenericSignature autodiff::getDifferentiabilityWitnessGenericSignature(
+    GenericSignature origGenSig, GenericSignature derivativeGenSig) {
+  // If there is no derivative generic signature, return the original generic
+  // signature.
+  if (!derivativeGenSig)
+    return origGenSig;
+  // If derivative generic signature has all concrete generic parameters and is
+  // equal to the original generic signature, return `nullptr`.
+  auto derivativeCanGenSig = derivativeGenSig.getCanonicalSignature();
+  auto origCanGenSig = origGenSig.getCanonicalSignature();
+  if (origCanGenSig == derivativeCanGenSig &&
+      derivativeCanGenSig->areAllParamsConcrete())
+    return GenericSignature();
+  // Otherwise, return the derivative generic signature.
+  return derivativeGenSig;
+}
+
 Type TangentSpace::getType() const {
   switch (kind) {
   case Kind::TangentVector:
@@ -420,6 +437,14 @@ void DerivativeFunctionTypeError::log(raw_ostream &OS) const {
     break;
   }
   }
+}
+
+inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                                     const DeclNameRefWithLoc &name) {
+  os << name.Name;
+  if (auto accessorKind = name.AccessorKind)
+    os << '.' << getAccessorLabel(*accessorKind);
+  return os;
 }
 
 bool swift::operator==(const TangentPropertyInfo::Error &lhs,
@@ -475,17 +500,16 @@ void swift::simple_display(llvm::raw_ostream &os, TangentPropertyInfo info) {
   os << " }";
 }
 
-TangentPropertyInfo
-TangentStoredPropertyRequest::evaluate(Evaluator &evaluator,
-                                       VarDecl *originalField) const {
-  assert(originalField->hasStorage() && originalField->isInstanceMember() &&
-         "Expected stored property");
+TangentPropertyInfo TangentStoredPropertyRequest::evaluate(
+    Evaluator &evaluator, VarDecl *originalField, CanType baseType) const {
+  assert(((originalField->hasStorage() && originalField->isInstanceMember()) ||
+          originalField->hasAttachedPropertyWrapper()) &&
+         "Expected a stored property or a property-wrapped property");
   auto *parentDC = originalField->getDeclContext();
   assert(parentDC->isTypeContext());
-  auto parentType = parentDC->getDeclaredTypeInContext();
   auto *moduleDecl = originalField->getModuleContext();
-  auto parentTan = parentType->getAutoDiffTangentSpace(
-      LookUpConformanceInModule(moduleDecl));
+  auto parentTan =
+      baseType->getAutoDiffTangentSpace(LookUpConformanceInModule(moduleDecl));
   // Error if parent nominal type does not conform to `Differentiable`.
   if (!parentTan) {
     return TangentPropertyInfo(
@@ -497,13 +521,18 @@ TangentStoredPropertyRequest::evaluate(Evaluator &evaluator,
         TangentPropertyInfo::Error::Kind::NoDerivativeOriginalProperty);
   }
   // Error if original property's type does not conform to `Differentiable`.
-  auto originalFieldTan = originalField->getType()->getAutoDiffTangentSpace(
+  auto originalFieldType = baseType->getTypeOfMember(
+      originalField->getModuleContext(), originalField);
+  auto originalFieldTan = originalFieldType->getAutoDiffTangentSpace(
       LookUpConformanceInModule(moduleDecl));
   if (!originalFieldTan) {
     return TangentPropertyInfo(
         TangentPropertyInfo::Error::Kind::OriginalPropertyNotDifferentiable);
   }
-  auto parentTanType = parentTan->getType();
+  // Get the parent `TangentVector` type.
+  auto parentTanType =
+      baseType->getAutoDiffTangentSpace(LookUpConformanceInModule(moduleDecl))
+          ->getType();
   auto *parentTanStruct = parentTanType->getStructOrBoundGenericStruct();
   // Error if parent `TangentVector` is not a struct.
   if (!parentTanStruct) {
@@ -533,7 +562,9 @@ TangentStoredPropertyRequest::evaluate(Evaluator &evaluator,
   // Error if tangent property's type is not equal to the original property's
   // `TangentVector` type.
   auto originalFieldTanType = originalFieldTan->getType();
-  if (!originalFieldTanType->isEqual(tanField->getType())) {
+  auto tanFieldType =
+      parentTanType->getTypeOfMember(tanField->getModuleContext(), tanField);
+  if (!originalFieldTanType->isEqual(tanFieldType)) {
     return TangentPropertyInfo(
         TangentPropertyInfo::Error::Kind::TangentPropertyWrongType,
         originalFieldTanType);

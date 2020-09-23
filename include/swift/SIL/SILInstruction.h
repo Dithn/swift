@@ -3213,6 +3213,20 @@ public:
       : InstructionBase(DebugLoc, Ty, nullptr) {}
 };
 
+/// Creates a base address for offset calculations.
+class BaseAddrForOffsetInst
+    : public InstructionBase<SILInstructionKind::BaseAddrForOffsetInst,
+                             LiteralInst> {
+  friend SILBuilder;
+
+  BaseAddrForOffsetInst(SILDebugLocation DebugLoc, SILType Ty)
+      : InstructionBase(DebugLoc, Ty) {}
+
+public:
+  ArrayRef<Operand> getAllOperands() const { return {}; }
+  MutableArrayRef<Operand> getAllOperands() { return {}; }
+};
+
 /// Gives the value of a global variable.
 ///
 /// The referenced global variable must be a statically initialized object.
@@ -3293,7 +3307,6 @@ public:
   enum class Encoding {
     Bytes,
     UTF8,
-    UTF16,
     /// UTF-8 encoding of an Objective-C selector.
     ObjCSelector,
   };
@@ -3937,6 +3950,16 @@ class AssignByWrapperInst
     : public AssignInstBase<SILInstructionKind::AssignByWrapperInst, 4> {
   friend SILBuilder;
 
+public:
+  /// The assignment destination for the property wrapper
+  enum class Destination {
+    BackingWrapper,
+    WrappedValue,
+  };
+
+private:
+  Destination AssignDest = Destination::WrappedValue;
+
   AssignByWrapperInst(SILDebugLocation DebugLoc, SILValue Src, SILValue Dest,
                        SILValue Initializer, SILValue Setter,
                        AssignOwnershipQualifier Qualifier =
@@ -3951,8 +3974,16 @@ public:
     return AssignOwnershipQualifier(
       SILInstruction::Bits.AssignByWrapperInst.OwnershipQualifier);
   }
-  void setOwnershipQualifier(AssignOwnershipQualifier qualifier) {
+
+  Destination getAssignDestination() const { return AssignDest; }
+
+  void setAssignInfo(AssignOwnershipQualifier qualifier, Destination dest) {
+    assert(qualifier == AssignOwnershipQualifier::Init && dest == Destination::BackingWrapper ||
+           qualifier == AssignOwnershipQualifier::Reassign && dest == Destination::BackingWrapper ||
+           qualifier == AssignOwnershipQualifier::Reassign && dest == Destination::WrappedValue);
+
     SILInstruction::Bits.AssignByWrapperInst.OwnershipQualifier = unsigned(qualifier);
+    AssignDest = dest;
   }
 };
 
@@ -4558,6 +4589,23 @@ class UncheckedBitwiseCastInst final
       : UnaryInstructionWithTypeDependentOperandsBase(DebugLoc, Operand,
                                                TypeDependentOperands, Ty) {}
   static UncheckedBitwiseCastInst *
+  create(SILDebugLocation DebugLoc, SILValue Operand, SILType Ty,
+         SILFunction &F, SILOpenedArchetypesState &OpenedArchetypes);
+};
+
+/// Bitwise copy a value into another value of the same size.
+class UncheckedValueCastInst final
+    : public UnaryInstructionWithTypeDependentOperandsBase<
+          SILInstructionKind::UncheckedValueCastInst, UncheckedValueCastInst,
+          OwnershipForwardingConversionInst> {
+  friend SILBuilder;
+
+  UncheckedValueCastInst(SILDebugLocation DebugLoc, SILValue Operand,
+                         ArrayRef<SILValue> TypeDependentOperands, SILType Ty)
+      : UnaryInstructionWithTypeDependentOperandsBase(
+            DebugLoc, Operand, TypeDependentOperands, Ty,
+            Operand.getOwnershipKind()) {}
+  static UncheckedValueCastInst *
   create(SILDebugLocation DebugLoc, SILValue Operand, SILType Ty,
          SILFunction &F, SILOpenedArchetypesState &OpenedArchetypes);
 };
@@ -8334,14 +8382,11 @@ public:
 /// representing a bundle of the original function and the transpose function,
 /// extract the specified function.
 class LinearFunctionExtractInst
-    : public InstructionBase<
-          SILInstructionKind::LinearFunctionExtractInst,
-          SingleValueInstruction> {
+    : public UnaryInstructionBase<SILInstructionKind::LinearFunctionExtractInst,
+                                  SingleValueInstruction> {
 private:
   /// The extractee.
   LinearDifferentiableFunctionTypeComponent extractee;
-  /// The list containing the `@differentiable(linear)` function operand.
-  FixedOperandList<1> operands;
 
   static SILType
   getExtracteeType(SILValue function,
@@ -8357,10 +8402,6 @@ public:
   LinearDifferentiableFunctionTypeComponent getExtractee() const {
     return extractee;
   }
-
-  SILValue getFunctionOperand() const { return operands[0].get(); }
-  ArrayRef<Operand> getAllOperands() const { return operands.asArray(); }
-  MutableArrayRef<Operand> getAllOperands() { return operands.asArray(); }
 };
 
 /// DifferentiabilityWitnessFunctionInst - Looks up a differentiability witness

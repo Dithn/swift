@@ -154,7 +154,7 @@ Flag<["-"], "enable-only-one-dependency-file">, Flags<[DoesNotAffectIncrementalB
 def disable_only_one_dependency_file :
 Flag<["-"], "disable-only-one-dependency-file">, Flags<[DoesNotAffectIncrementalBuild]>,
  HelpText<"Disables incremental build optimization that only produces one dependencies file">;
- 
+
 
 def enable_source_range_dependencies :
 Flag<["-"], "enable-source-range-dependencies">, Flags<[]>,
@@ -167,7 +167,7 @@ HelpText<"Print a simple message comparing dependencies with source ranges (w/ f
 
 def driver_compare_incremental_schemes_path :
 Separate<["-"], "driver-compare-incremental-schemes-path">, Flags<[ArgumentIsPath,DoesNotAffectIncrementalBuild]>,
-HelpText<"Path to use for machine-readable comparision">,
+HelpText<"Path to use for machine-readable comparison">,
 MetaVarName<"<path>">;
 
 def driver_compare_incremental_schemes_path_EQ :
@@ -197,7 +197,7 @@ HelpText<"Include within-file dependencies.">;
 
 def emit_fine_grained_dependency_sourcefile_dot_files :
 Flag<["-"], "emit-fine-grained-dependency-sourcefile-dot-files">,
-InternalDebugOpt,
+Flags<[FrontendOption, HelpHidden]>,
 HelpText<"Emit dot files for every source file.">;
 
 def driver_mode : Joined<["--"], "driver-mode=">, Flags<[HelpHidden]>,
@@ -443,6 +443,17 @@ def emit_module_path_EQ : Joined<["-"], "emit-module-path=">,
          ArgumentIsPath, SupplementaryOutput]>,
   Alias<emit_module_path>;
 
+def emit_module_summary :
+  Flag<["-"], "emit-module-summary">,
+  Flags<[NoInteractiveOption, DoesNotAffectIncrementalBuild,
+         SupplementaryOutput]>,
+  HelpText<"Output module summary file">;
+def emit_module_summary_path :
+  Separate<["-"], "emit-module-summary-path">,
+  Flags<[FrontendOption, NoInteractiveOption, DoesNotAffectIncrementalBuild,
+         ArgumentIsPath, SupplementaryOutput]>,
+  MetaVarName<"<path>">, HelpText<"Output module summary file to <path>">;
+
 def emit_module_interface :
   Flag<["-"], "emit-module-interface">,
   Flags<[NoInteractiveOption, DoesNotAffectIncrementalBuild,
@@ -459,6 +470,15 @@ def emit_private_module_interface_path :
   Flags<[FrontendOption, NoInteractiveOption, HelpHidden,
          DoesNotAffectIncrementalBuild, ArgumentIsPath, SupplementaryOutput]>,
   MetaVarName<"<path>">, HelpText<"Output private module interface file to <path>">;
+
+def verify_emitted_module_interface :
+  Flag<["-"], "verify-emitted-module-interface">,
+  Flags<[NoInteractiveOption, DoesNotAffectIncrementalBuild]>,
+  HelpText<"Check that module interfaces emitted during compilation typecheck">;
+def no_verify_emitted_module_interface :
+  Flag<["-"], "no-verify-emitted-module-interface">,
+  Flags<[NoInteractiveOption, DoesNotAffectIncrementalBuild]>,
+  HelpText<"Don't check that module interfaces emitted during compilation typecheck">;
 
 def avoid_emit_module_source_info :
   Flag<["-"], "avoid-emit-module-source-info">,
@@ -523,6 +543,10 @@ def disable_bridging_pch : Flag<["-"], "disable-bridging-pch">,
   Flags<[HelpHidden]>,
   HelpText<"Disable automatic generation of bridging PCH files">;
 
+def lto : Joined<["-"], "lto=">,
+  Flags<[FrontendOption, NoInteractiveOption]>,
+  HelpText<"Specify the LTO type to either 'llvm-thin' or 'llvm-full'">;
+
 // Experimental feature options
 
 // Note: this flag will be removed when JVP/differential generation in the
@@ -539,18 +563,26 @@ def enable_experimental_additive_arithmetic_derivation :
 
 def enable_experimental_concise_pound_file : Flag<["-"],
     "enable-experimental-concise-pound-file">,
-  Flags<[FrontendOption]>,
+  Flags<[FrontendOption, ModuleInterfaceOption]>,
   HelpText<"Enable experimental concise '#file' identifier">;
 
-def enable_direct_intramodule_dependencies : Flag<["-"],
-    "enable-direct-intramodule-dependencies">,
-  Flags<[FrontendOption, HelpHidden]>,
-  HelpText<"Enable experimental dependency tracking that never cascades">;
+def disable_fuzzy_forward_scan_trailing_closure_matching : Flag<["-"],
+    "disable-fuzzy-forward-scan-trailing-closure-matching">,
+  Flags<[FrontendOption]>,
+  HelpText<"Disable fuzzy forward-scan trailing closure matching">;
 
-def disable_direct_intramodule_dependencies : Flag<["-"],
-    "disable-direct-intramodule-dependencies">,
-  Flags<[FrontendOption, HelpHidden]>,
-  HelpText<"Disable experimental dependency tracking that never cascades">;
+def enable_fuzzy_forward_scan_trailing_closure_matching : Flag<["-"],
+    "enable-fuzzy-forward-scan-trailing-closure-matching">,
+  Flags<[FrontendOption]>,
+  HelpText<"Enable fuzzy forward-scan trailing closure matching">;
+
+def enable_experimental_cxx_interop :
+  Flag<["-"], "enable-experimental-cxx-interop">,
+  HelpText<"Allow importing C++ modules into Swift (experimental feature)">;
+
+def experimental_cxx_stdlib :
+  Separate<["-"], "experimental-cxx-stdlib">,
+  HelpText<"C++ standard library to use; forwarded to Clang's -stdlib flag">;
 
 
 // Diagnostic control options
@@ -1072,13 +1104,9 @@ def scan_dependencies : Flag<["-"], "scan-dependencies">,
   HelpText<"Scan dependencies of the given Swift sources">, ModeOpt,
   Flags<[FrontendOption, NoInteractiveOption, DoesNotAffectIncrementalBuild]>;
 
-def enable_astscope_lookup : Flag<["-"], "enable-astscope-lookup">,
-  Flags<[FrontendOption]>,
-  HelpText<"Enable ASTScope-based unqualified name lookup">;
-
-def disable_astscope_lookup : Flag<["-"], "disable-astscope-lookup">,
-  Flags<[FrontendOption]>,
-  HelpText<"Disable ASTScope-based unqualified name lookup">;
+def scan_clang_dependencies : Flag<["-"], "scan-clang-dependencies">,
+  HelpText<"Scan dependencies of the given Clang module">, ModeOpt,
+  Flags<[FrontendOption, NoInteractiveOption, DoesNotAffectIncrementalBuild]>;
 
 def disable_parser_lookup : Flag<["-"], "disable-parser-lookup">,
   Flags<[FrontendOption]>,

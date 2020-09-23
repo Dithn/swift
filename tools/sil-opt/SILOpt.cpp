@@ -172,10 +172,6 @@ static llvm::cl::opt<unsigned>
 AssertConfId("assert-conf-id", llvm::cl::Hidden,
              llvm::cl::init(0));
 
-static llvm::cl::opt<bool>
-DisableSILLinking("disable-sil-linking",
-                  llvm::cl::desc("Disable SIL linking"));
-
 static llvm::cl::opt<int>
 SILInlineThreshold("sil-inline-threshold", llvm::cl::Hidden,
                    llvm::cl::init(-1));
@@ -203,10 +199,9 @@ static llvm::cl::opt<std::string>
 ModuleCachePath("module-cache-path", llvm::cl::desc("Clang module cache path"));
 
 static llvm::cl::opt<bool>
-EnableSILSortOutput("emit-sorted-sil", llvm::cl::Hidden,
-                    llvm::cl::init(false),
-                    llvm::cl::desc("Sort Functions, VTables, Globals, "
-                                   "WitnessTables by name to ease diffing."));
+    EmitSortedSIL("emit-sorted-sil", llvm::cl::Hidden, llvm::cl::init(false),
+                  llvm::cl::desc("Sort Functions, VTables, Globals, "
+                                 "WitnessTables by name to ease diffing."));
 
 static llvm::cl::opt<bool>
 DisableASTDump("sil-disable-ast-dump", llvm::cl::Hidden,
@@ -277,6 +272,11 @@ static llvm::cl::opt<bool>
     EnableCxxInterop("enable-cxx-interop",
                      llvm::cl::desc("Enable C++ interop."),
                      llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+    IgnoreAlwaysInline("ignore-always-inline",
+                       llvm::cl::desc("Ignore [always_inline] attribute."),
+                       llvm::cl::init(false));
 
 static void runCommandLineSelectedPasses(SILModule *Module,
                                          irgen::IRGenModule *IRGenMod) {
@@ -400,8 +400,11 @@ int main(int argc, char **argv) {
       break;
     }
   }
+  SILOpts.EmitVerboseSIL |= EmitVerboseSIL;
+  SILOpts.EmitSortedSIL |= EmitSortedSIL;
 
   SILOpts.EnableSpeculativeDevirtualization = EnableSpeculativeDevirtualization;
+  SILOpts.IgnoreAlwaysInline = IgnoreAlwaysInline;
 
   serialization::ExtendedValidationInfo extendedInfo;
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> FileBufOrErr =
@@ -463,17 +466,6 @@ int main(int argc, char **argv) {
                                 CI.getSILOptions());
   }
   SILMod->setSerializeSILAction([]{});
-
-  // Load the SIL if we have a non-SIB serialized module. SILGen handles SIB for
-  // us.
-  if (Invocation.hasSerializedAST() && !extendedInfo.isSIB()) {
-    auto SL = SerializedSILLoader::create(
-        CI.getASTContext(), SILMod.get(), nullptr);
-    if (DisableSILLinking)
-      SL->getAllForModule(CI.getMainModule()->getName(), nullptr);
-    else
-      SL->getAll();
-  }
 
   if (!RemarksFilename.empty()) {
     llvm::Expected<llvm::remarks::Format> formatOrErr =
@@ -539,7 +531,7 @@ int main(int argc, char **argv) {
                                    StringRef(OutputFilename) : "-";
     auto SILOpts = SILOptions();
     SILOpts.EmitVerboseSIL = EmitVerboseSIL;
-    SILOpts.EmitSortedSIL = EnableSILSortOutput;
+    SILOpts.EmitSortedSIL = EmitSortedSIL;
     if (OutputFile == "-") {
       SILMod->print(llvm::outs(), CI.getMainModule(), SILOpts, !DisableASTDump);
     } else {
